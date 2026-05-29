@@ -22,6 +22,15 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private async iniciarBot() {
+    const allowedNumbers = new Set(
+      (process.env.WHATSAPP_ALLOWED_NUMBERS || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
+    const allowOwnMessages =
+      (process.env.WHATSAPP_ALLOW_OWN_MESSAGES || '').toLowerCase() === 'true';
+
     // 1. Manejo de Sesión (guarda tu login para no escanear el QR cada vez)
     const { state, saveCreds } =
       await useMultiFileAuthState('auth_info_baileys');
@@ -71,19 +80,15 @@ export class WhatsappService implements OnModuleInit {
         const msg = m.messages?.[0];
         const remoteJid = msg?.key?.remoteJid;
         const fromMe = msg?.key?.fromMe;
+        const numero = remoteJid?.split('@')[0] || '';
 
-        console.log('📩 Upsert', {
-          type: m.type,
-          fromMe,
-          remoteJid,
-          hasMessage: Boolean(msg?.message),
-        });
-
-        if (msg?.message) {
-          console.log('🧾 Payload keys', Object.keys(msg.message));
+        if (fromMe && !allowOwnMessages) return;
+        if (!remoteJid || remoteJid.includes('@g.us')) return;
+        if (allowedNumbers.size > 0 && !allowedNumbers.has(numero)) {
+          return;
         }
 
-        if (!msg?.message || remoteJid?.includes('@g.us')) return;
+        if (!msg?.message) return;
 
         const extendedText = msg.message.extendedTextMessage;
         const extendedTextAny = extendedText as
@@ -96,20 +101,26 @@ export class WhatsappService implements OnModuleInit {
           extendedTextAny?.matchedText ||
           '';
 
-        if (!textoMensaje) {
-          console.log('⚠️ Texto vacio', {
-            extendedKeys: Object.keys(extendedText || {}),
-            canonicalUrl: extendedTextAny?.canonicalUrl,
-            matchedText: extendedTextAny?.matchedText,
-          });
-        }
-
         // Ampliamos el filtro para cachar varios tipos de links de Google Maps
         const tieneLinkGoogleMaps =
           textoMensaje.includes('maps.app.goo.gl') ||
           textoMensaje.includes('goo.gl/maps') ||
           textoMensaje.includes('maps.google.com') ||
           textoMensaje.includes('google.com/maps');
+
+        if (!tieneLinkGoogleMaps) return;
+
+        console.log('📩 Upsert', {
+          type: m.type,
+          fromMe,
+          remoteJid,
+          hasMessage: Boolean(msg?.message),
+          textoMensaje: textoMensaje.slice(0, 120),
+        });
+
+        if (msg?.message) {
+          console.log('🧾 Payload keys', Object.keys(msg.message));
+        }
 
         if (tieneLinkGoogleMaps) {
           console.log(`📍 Mensaje recibido de: ${msg.pushName}`);
@@ -159,10 +170,6 @@ export class WhatsappService implements OnModuleInit {
               text: '❌ No pude extraer las coordenadas.',
             });
           }
-        } else {
-          console.log('⏭️ Sin link Google Maps', {
-            textoMensaje: textoMensaje.slice(0, 200),
-          });
         }
       })();
     });
