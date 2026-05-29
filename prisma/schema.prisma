@@ -1,0 +1,19 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model UbicacionReportada {
+  id               String   @id @default(uuid())
+  nombre           String
+  latitud          Float
+  longitud         Float
+  urlOriginal      String
+  telefonoVendedor String
+  nombreVendedor   String?
+  creadoEn         DateTime @default(now())
+  actualizadoEn    DateTime @updatedAt
+}
