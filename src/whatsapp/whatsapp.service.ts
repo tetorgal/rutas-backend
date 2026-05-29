@@ -22,8 +22,15 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private async iniciarBot() {
+    const normalizeNumber = (value: string) => value.replace(/[^0-9]/g, '');
     const allowedNumbers = new Set(
       (process.env.WHATSAPP_ALLOWED_NUMBERS || '')
+        .split(',')
+        .map((value) => normalizeNumber(value.trim()))
+        .filter(Boolean),
+    );
+    const allowedLids = new Set(
+      (process.env.WHATSAPP_ALLOWED_LIDS || '')
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean),
@@ -80,12 +87,26 @@ export class WhatsappService implements OnModuleInit {
         const msg = m.messages?.[0];
         const remoteJid = msg?.key?.remoteJid;
         const fromMe = msg?.key?.fromMe;
-        const numero = remoteJid?.split('@')[0] || '';
+        const numero = normalizeNumber(remoteJid?.split('@')[0] || '');
+        const isLid = remoteJid?.endsWith('@lid') ?? false;
+        const lid = isLid ? remoteJid?.split('@')[0] || '' : '';
 
         if (fromMe && !allowOwnMessages) return;
         if (!remoteJid || remoteJid.includes('@g.us')) return;
-        if (allowedNumbers.size > 0 && !allowedNumbers.has(numero)) {
-          return;
+        if (!fromMe) {
+          if (isLid) {
+            if (allowedLids.size > 0 && !allowedLids.has(lid)) {
+              console.log('⛔️ LID no autorizado', { remoteJid, lid });
+              return;
+            }
+            if (allowedNumbers.size > 0 && allowedLids.size === 0) {
+              console.log('⛔️ LID sin allowlist', { remoteJid, lid });
+              return;
+            }
+          } else if (allowedNumbers.size > 0 && !allowedNumbers.has(numero)) {
+            console.log('⛔️ Numero no autorizado', { remoteJid, numero });
+            return;
+          }
         }
 
         if (!msg?.message) return;
