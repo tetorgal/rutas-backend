@@ -104,7 +104,13 @@ export class WhatsappService implements OnModuleInit {
         const fromMe = msg.key?.fromMe;
 
         if (fromMe && !allowOwnMessages) return;
-        if (!remoteJid || remoteJid.includes('@g.us')) return;
+        if (
+          !remoteJid ||
+          remoteJid.includes('@g.us') ||
+          remoteJid.includes('@newsletter') ||
+          remoteJid.includes('@status')
+        )
+          return;
         const lidRemitente = remoteJid.split('@')[0];
         let vendedorAutorizado: VendedorRecord | null = null;
 
@@ -192,6 +198,7 @@ export class WhatsappService implements OnModuleInit {
                     nombre: datosUbicacion.nombre,
                     latitud: datosUbicacion.lat,
                     longitud: datosUbicacion.lng,
+                    SAP: datosUbicacion.sap,
                     urlOriginal:
                       textoMensaje.match(/(https?:\/\/[^\s]+)/g)?.[0] || '',
                     telefonoVendedor: remoteJid.split('@')[0],
@@ -208,7 +215,7 @@ export class WhatsappService implements OnModuleInit {
               console.log('Registro guardado en BD:', nuevoRegistro);
 
               await sock.sendMessage(remoteJid, {
-                text: `Guardado correctamente!\n\n*Cliente:* ${nuevoRegistro.nombre}\n*Vendedor:* ${nuevoRegistro.nombreVendedor}\n*Coordenadas:* ${nuevoRegistro.latitud}, ${nuevoRegistro.longitud}`,
+                text: `Guardado correctamente!\n\n*Cliente:* ${nuevoRegistro.nombre}\n*SAP:* ${nuevoRegistro.SAP}\n*Vendedor:* ${nuevoRegistro.nombreVendedor}\n*Coordenadas:* ${nuevoRegistro.latitud}, ${nuevoRegistro.longitud}`,
               });
             } catch (dbError) {
               console.error('Prisma insert FAIL', dbError);
@@ -227,7 +234,7 @@ export class WhatsappService implements OnModuleInit {
   }
   private async obtenerCoordenadas(
     mensaje: string,
-  ): Promise<{ nombre: string; lat: number; lng: number } | null> {
+  ): Promise<{ nombre: string; lat: number; lng: number; sap: string } | null> {
     try {
       // 1. Extraer la URL del texto
       const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -238,7 +245,17 @@ export class WhatsappService implements OnModuleInit {
       const urlCorta = urls[0];
 
       // 2. Limpiar el nombre del cliente (todo lo que no es la URL)
-      const nombreCliente = mensaje.replace(urlCorta, '').trim();
+      let nombreCliente = mensaje.replace(urlCorta, '').trim();
+
+      // Intentar extraer el código SAP (ej: número de 5 a 12 dígitos)
+      const sapMatch = nombreCliente.match(/\b\d{5,12}\b/);
+      const sap = sapMatch ? sapMatch[0] : 'S/N';
+      if (sapMatch) {
+        nombreCliente = nombreCliente
+          .replace(sapMatch[0], '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
 
       // 3. Hacer fetch a la URL corta para que Node siga la redirección
       const respuesta = await fetch(urlCorta);
@@ -250,9 +267,10 @@ export class WhatsappService implements OnModuleInit {
 
       if (match) {
         return {
-          nombre: nombreCliente || 'Cliente sin nombre',
+          nombre: nombreCliente || `Cliente ${sap}`,
           lat: parseFloat(match[1]),
           lng: parseFloat(match[2]),
+          sap,
         };
       }
 
