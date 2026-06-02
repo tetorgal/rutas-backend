@@ -12,6 +12,30 @@ type QrCodeTerminal = {
   generate: (text: string, opts?: { small?: boolean }) => void;
 };
 
+type VendedorRecord = {
+  lid: string;
+  nombreReal: string;
+  activo: boolean;
+};
+
+type PrismaAccess = {
+  vendedor: {
+    findUnique: (args: {
+      where: { lid: string };
+    }) => Promise<VendedorRecord | null>;
+  };
+  solicitudAcceso: {
+    upsert: (args: {
+      where: { lid: string };
+      update: { fecha: Date; nombreWa?: string | null };
+      create: { lid: string; nombreWa?: string | null };
+    }) => Promise<{ lid: string }>;
+  };
+};
+
+const toText = (value: unknown): string =>
+  typeof value === 'string' ? value : '';
+
 const qrTerminal = qrcodeTerminal as QrCodeTerminal;
 
 @Injectable()
@@ -22,21 +46,9 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private async iniciarBot() {
-    const normalizeNumber = (value: string) => value.replace(/[^0-9]/g, '');
-    const allowedNumbers = new Set(
-      (process.env.WHATSAPP_ALLOWED_NUMBERS || '')
-        .split(',')
-        .map((value) => normalizeNumber(value.trim()))
-        .filter(Boolean),
-    );
-    const allowedLids = new Set(
-      (process.env.WHATSAPP_ALLOWED_LIDS || '')
-        .split(',')
-        .map((value) => value.trim())
-        .filter(Boolean),
-    );
     const allowOwnMessages =
       (process.env.WHATSAPP_ALLOW_OWN_MESSAGES || '').toLowerCase() === 'true';
+    const prisma = this.prisma as unknown as PrismaAccess;
 
     // 1. Manejo de Sesión (guarda tu login para no escanear el QR cada vez)
     const { state, saveCreds } =
@@ -60,11 +72,13 @@ export class WhatsappService implements OnModuleInit {
       }
 
       if (connection === 'close') {
-        const lastError = lastDisconnect?.error as
-          | { output?: { statusCode?: number } }
-          | undefined;
-        const reset =
-          lastError?.output?.statusCode !== DisconnectReason.loggedOut;
+        const lastError = lastDisconnect?.error;
+        const statusCode =
+          lastError && typeof lastError === 'object' && 'output' in lastError
+            ? (lastError as { output?: { statusCode?: number } }).output
+                ?.statusCode
+            : undefined;
+        const reset = statusCode !== DisconnectReason.loggedOut;
         console.log('Conexión cerrada. ¿Reconectar?', reset);
         if (reset) {
           void this.iniciarBot(); // Intenta reconectar si no cerraste sesión manualmente
@@ -85,41 +99,55 @@ export class WhatsappService implements OnModuleInit {
     sock.ev.on('messages.upsert', (m) => {
       void (async () => {
         const msg = m.messages?.[0];
-        const remoteJid = msg?.key?.remoteJid;
-        const fromMe = msg?.key?.fromMe;
-        const numero = normalizeNumber(remoteJid?.split('@')[0] || '');
-        const isLid = remoteJid?.endsWith('@lid') ?? false;
-        const lid = isLid ? remoteJid?.split('@')[0] || '' : '';
+        if (!msg) return;
+        const remoteJid = msg.key?.remoteJid;
+        const fromMe = msg.key?.fromMe;
 
         if (fromMe && !allowOwnMessages) return;
         if (!remoteJid || remoteJid.includes('@g.us')) return;
+        const lidRemitente = remoteJid.split('@')[0];
+        let vendedorAutorizado: VendedorRecord | null = null;
+
         if (!fromMe) {
-          if (isLid) {
-            if (allowedLids.size > 0 && !allowedLids.has(lid)) {
-              console.log('⛔️ LID no autorizado', { remoteJid, lid });
-              return;
-            }
-            if (allowedNumbers.size > 0 && allowedLids.size === 0) {
-              console.log('⛔️ LID sin allowlist', { remoteJid, lid });
-              return;
-            }
-          } else if (allowedNumbers.size > 0 && !allowedNumbers.has(numero)) {
-            console.log('⛔️ Numero no autorizado', { remoteJid, numero });
+          const vendedor = await prisma.vendedor.findUnique({
+            where: { lid: lidRemitente },
+          });
+
+          if (!vendedor || !vendedor.activo) {
+            console.log('⛔ LID no autorizado. Enviando a sala de espera.', {
+              remoteJid,
+              lidRemitente,
+            });
+
+            await prisma.solicitudAcceso.upsert({
+              where: { lid: lidRemitente },
+              update: { fecha: new Date(), nombreWa: msg.pushName },
+              create: { lid: lidRemitente, nombreWa: msg.pushName },
+            });
+
+            // await sock.sendMessage(remoteJid, {
+            //   text: '👋 Hola. Este dispositivo no está registrado en el sistema. Le he notificado a tu supervisor. Por favor, pídele que apruebe tu acceso.',
+            // });
+
             return;
           }
+
+          vendedorAutorizado = vendedor;
         }
 
         if (!msg?.message) return;
 
         const extendedText = msg.message.extendedTextMessage;
         const extendedTextAny = extendedText as
-          | { canonicalUrl?: string; matchedText?: string }
+          | { canonicalUrl?: unknown; matchedText?: unknown }
           | undefined;
+        const canonicalUrl = toText(extendedTextAny?.canonicalUrl);
+        const matchedText = toText(extendedTextAny?.matchedText);
         const textoMensaje =
-          msg.message.conversation ||
-          extendedText?.text ||
-          extendedTextAny?.canonicalUrl ||
-          extendedTextAny?.matchedText ||
+          toText(msg.message.conversation) ||
+          toText(extendedText?.text) ||
+          canonicalUrl ||
+          matchedText ||
           '';
 
         // Ampliamos el filtro para cachar varios tipos de links de Google Maps
@@ -144,7 +172,7 @@ export class WhatsappService implements OnModuleInit {
         }
 
         if (tieneLinkGoogleMaps) {
-          console.log(`📍 Mensaje recibido de: ${msg.pushName}`);
+          console.log(`Mensaje recibido de: ${msg.pushName}`);
 
           if (!remoteJid) return;
 
@@ -155,7 +183,9 @@ export class WhatsappService implements OnModuleInit {
           const datosUbicacion = await this.obtenerCoordenadas(textoMensaje);
           if (datosUbicacion) {
             try {
-              // ---- GUARDAR EN POSTGRESQL ----
+              const nombreVendedor =
+                vendedorAutorizado?.nombreReal || msg.pushName || 'Desconocido';
+              // ---- GUARDAR EN BD ----
               const nuevoRegistro = await this.prisma.ubicacionReportada.create(
                 {
                   data: {
@@ -165,30 +195,30 @@ export class WhatsappService implements OnModuleInit {
                     urlOriginal:
                       textoMensaje.match(/(https?:\/\/[^\s]+)/g)?.[0] || '',
                     telefonoVendedor: remoteJid.split('@')[0],
-                    nombreVendedor: msg.pushName || 'Desconocido',
+                    nombreVendedor: nombreVendedor,
                   },
                 },
               );
 
-              console.log('✅ Prisma insert OK', {
+              console.log('Prisma insert OK', {
                 id: nuevoRegistro.id,
                 nombre: nuevoRegistro.nombre,
               });
 
-              console.log('💾 Registro guardado en BD:', nuevoRegistro);
+              console.log('Registro guardado en BD:', nuevoRegistro);
 
               await sock.sendMessage(remoteJid, {
-                text: `✅ Guardado correctamente!\n\n*Cliente:* ${nuevoRegistro.nombre}\n*Vendedor:* ${nuevoRegistro.nombreVendedor}\n*Coordenadas:* ${nuevoRegistro.latitud}, ${nuevoRegistro.longitud}`,
+                text: `Guardado correctamente!\n\n*Cliente:* ${nuevoRegistro.nombre}\n*Vendedor:* ${nuevoRegistro.nombreVendedor}\n*Coordenadas:* ${nuevoRegistro.latitud}, ${nuevoRegistro.longitud}`,
               });
             } catch (dbError) {
-              console.error('❌ Prisma insert FAIL', dbError);
+              console.error('Prisma insert FAIL', dbError);
               await sock.sendMessage(remoteJid, {
-                text: '❌ Error interno al guardar la ubicación.',
+                text: 'Error interno al guardar la ubicación.',
               });
             }
           } else {
             await sock.sendMessage(remoteJid, {
-              text: '❌ No pude extraer las coordenadas.',
+              text: 'No pude extraer las coordenadas.',
             });
           }
         }
@@ -199,7 +229,7 @@ export class WhatsappService implements OnModuleInit {
     mensaje: string,
   ): Promise<{ nombre: string; lat: number; lng: number } | null> {
     try {
-      // 1. Extraer la URL del texto usando una expresión regular
+      // 1. Extraer la URL del texto
       const urlRegex = /(https?:\/\/[^\s]+)/g;
       const urls = mensaje.match(urlRegex);
 

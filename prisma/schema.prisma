@@ -6,14 +6,55 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum DiaSemana {
+  LUNES
+  MARTES
+  MIERCOLES
+  JUEVES
+  VIERNES
+  SABADO
+}
+
 model UbicacionReportada {
-  id               String   @id @default(uuid())
+  id               String      @id @default(uuid())
   nombre           String
   latitud          Float
   longitud         Float
+  SAP              String // Codigo unico ferrero
   urlOriginal      String
   telefonoVendedor String
   nombreVendedor   String?
-  creadoEn         DateTime @default(now())
-  actualizadoEn    DateTime @updatedAt
+  // El punto le pertenece a la Ruta
+  rutaId           String?
+  ruta             Ruta?       @relation(fields: [rutaId], references: [id])
+  diasVisita       DiaSemana[]
+  creadoEn         DateTime    @default(now())
+  actualizadoEn    DateTime    @updatedAt
+}
+
+model Vendedor {
+  lid          String   @id
+  nombreReal   String
+  telefono     String?
+  activo       Boolean  @default(true)
+  creadoEn     DateTime @default(now())
+  // Gestion de ruta
+  rutaActualId String?
+  rutaActual   Ruta?    @relation(fields: [rutaActualId], references: [id])
+}
+
+model SolicitudAcceso {
+  lid      String   @id
+  nombreWa String? // El nombre que la persona tiene puesto en su WhatsApp
+  fecha    DateTime @default(now())
+  estado   String   @default("PENDIENTE") // PENDIENTE, APROBADO, RECHAZADO
+}
+
+model Ruta {
+  id          String               @id @default(uuid())
+  nombre      String               @unique // Ej: "Ruta 10", "Ruta 12"
+  colorHex    String               @default("#3B82F6") // Para diferenciar los pines en el mapa visualmente
+  // Relaciones
+  vendedores  Vendedor[] // Vendedores actualmente asignados a esta ruta
+  ubicaciones UbicacionReportada[] // Puntos que pertenecen a esta ruta
 }
