@@ -38,6 +38,20 @@ export class RutasService {
     });
   }
 
+  async actualizar(id: string, data: { nombre?: string; colorHex?: string }) {
+    const existe = await this.prisma.ruta.findUnique({ where: { id } });
+    if (!existe) {
+      throw new NotFoundException(`Ruta con ID ${id} no encontrada`);
+    }
+    return this.prisma.ruta.update({
+      where: { id },
+      data: {
+        nombre: data.nombre,
+        colorHex: data.colorHex,
+      },
+    });
+  }
+
   async eliminar(id: string) {
     const existe = await this.prisma.ruta.findUnique({ where: { id } });
     if (!existe) {

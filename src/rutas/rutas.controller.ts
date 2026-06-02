@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
 import { RutasService } from './rutas.service';
 
 @Controller('rutas')
@@ -19,6 +19,14 @@ export class RutasController {
   @HttpCode(HttpStatus.CREATED)
   async crear(@Body() data: { nombre: string; colorHex?: string }) {
     return this.rutasService.crear(data);
+  }
+
+  @Put(':id')
+  async actualizar(
+    @Param('id') id: string,
+    @Body() data: { nombre?: string; colorHex?: string },
+  ) {
+    return this.rutasService.actualizar(id, data);
   }
 
   @Delete(':id')

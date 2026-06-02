@@ -108,11 +108,13 @@ export class WhatsappService implements OnModuleInit {
           !remoteJid ||
           remoteJid.includes('@g.us') ||
           remoteJid.includes('@newsletter') ||
-          remoteJid.includes('@status')
+          remoteJid.includes('@status') ||
+          remoteJid.includes('status') ||
+          remoteJid.includes('@broadcast')
         )
           return;
         const lidRemitente = remoteJid.split('@')[0];
-        let vendedorAutorizado: VendedorRecord | null = null;
+        // let vendedorAutorizado: VendedorRecord | null = null;
 
         if (!fromMe) {
           const vendedor = await prisma.vendedor.findUnique({
@@ -138,7 +140,7 @@ export class WhatsappService implements OnModuleInit {
             return;
           }
 
-          vendedorAutorizado = vendedor;
+          // vendedorAutorizado = vendedor;
         }
 
         if (!msg?.message) return;
@@ -189,8 +191,12 @@ export class WhatsappService implements OnModuleInit {
           const datosUbicacion = await this.obtenerCoordenadas(textoMensaje);
           if (datosUbicacion) {
             try {
+              const lid = remoteJid.split('@')[0];
+              const vendedorExiste = await this.prisma.vendedor.findUnique({
+                where: { lid },
+              });
               const nombreVendedor =
-                vendedorAutorizado?.nombreReal || msg.pushName || 'Desconocido';
+                vendedorExiste?.nombreReal || msg.pushName || 'Desconocido';
               // ---- GUARDAR EN BD ----
               const nuevoRegistro = await this.prisma.ubicacionReportada.create(
                 {
@@ -201,8 +207,7 @@ export class WhatsappService implements OnModuleInit {
                     SAP: datosUbicacion.sap,
                     urlOriginal:
                       textoMensaje.match(/(https?:\/\/[^\s]+)/g)?.[0] || '',
-                    telefonoVendedor: remoteJid.split('@')[0],
-                    nombreVendedor: nombreVendedor,
+                    vendedorLid: vendedorExiste ? lid : null,
                   },
                 },
               );
@@ -215,7 +220,7 @@ export class WhatsappService implements OnModuleInit {
               console.log('Registro guardado en BD:', nuevoRegistro);
 
               await sock.sendMessage(remoteJid, {
-                text: `Guardado correctamente!\n\n*Cliente:* ${nuevoRegistro.nombre}\n*SAP:* ${nuevoRegistro.SAP}\n*Vendedor:* ${nuevoRegistro.nombreVendedor}\n*Coordenadas:* ${nuevoRegistro.latitud}, ${nuevoRegistro.longitud}`,
+                text: `Guardado correctamente!\n\n*Cliente:* ${nuevoRegistro.nombre}\n*SAP:* ${nuevoRegistro.SAP}\n*Vendedor:* ${nombreVendedor}\n*Coordenadas:* ${nuevoRegistro.latitud}, ${nuevoRegistro.longitud}`,
               });
             } catch (dbError) {
               console.error('Prisma insert FAIL', dbError);
@@ -262,7 +267,7 @@ export class WhatsappService implements OnModuleInit {
       const urlFinal = respuesta.url; // Aquí está el enlace largo de Google Maps
 
       // 4. Extraer Latitud y Longitud con Regex (buscamos el patrón @lat,lng)
-      const coordenadasRegex = /@(-?\d+\.\d+),(-?\d+\.\d+)/;
+      const coordenadasRegex = /[@=](-?\d+\.\d+),(-?\d+\.\d+)/;
       const match = urlFinal.match(coordenadasRegex);
 
       if (match) {

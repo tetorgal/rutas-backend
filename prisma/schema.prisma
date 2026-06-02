@@ -16,31 +16,32 @@ enum DiaSemana {
 }
 
 model UbicacionReportada {
-  id               String      @id @default(uuid())
-  nombre           String
-  latitud          Float
-  longitud         Float
-  SAP              String // Codigo unico ferrero
-  urlOriginal      String
-  telefonoVendedor String
-  nombreVendedor   String?
+  id            String      @id @default(uuid())
+  nombre        String
+  latitud       Float
+  longitud      Float
+  SAP           String // Codigo unico ferrero
+  urlOriginal   String
+  vendedorLid   String?
+  vendedor      Vendedor?   @relation(fields: [vendedorLid], references: [lid], onDelete: SetNull)
   // El punto le pertenece a la Ruta
-  rutaId           String?
-  ruta             Ruta?       @relation(fields: [rutaId], references: [id])
-  diasVisita       DiaSemana[]
-  creadoEn         DateTime    @default(now())
-  actualizadoEn    DateTime    @updatedAt
+  rutaId        String?
+  ruta          Ruta?       @relation(fields: [rutaId], references: [id])
+  diasVisita    DiaSemana[]
+  creadoEn      DateTime    @default(now())
+  actualizadoEn DateTime    @updatedAt
 }
 
 model Vendedor {
-  lid          String   @id
-  nombreReal   String
-  telefono     String?
-  activo       Boolean  @default(true)
-  creadoEn     DateTime @default(now())
+  lid                 String               @id
+  nombreReal          String
+  telefono            String?
+  activo              Boolean              @default(true)
+  creadoEn            DateTime             @default(now())
   // Gestion de ruta
-  rutaActualId String?
-  rutaActual   Ruta?    @relation(fields: [rutaActualId], references: [id])
+  rutaActualId        String?
+  rutaActual          Ruta?                @relation(fields: [rutaActualId], references: [id])
+  ubicacionesReportadas UbicacionReportada[]
 }
 
 model SolicitudAcceso {
