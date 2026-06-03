@@ -40,7 +40,12 @@ const qrTerminal = qrcodeTerminal as QrCodeTerminal;
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
+  public estadoConexion: 'DESCONECTADO' | 'ESPERANDO_QR' | 'CONECTADO' =
+    'DESCONECTADO';
+  public qrActual: string | null = null;
+
   constructor(private prisma: PrismaService) {}
+
   async onModuleInit() {
     await this.iniciarBot();
   }
@@ -48,6 +53,7 @@ export class WhatsappService implements OnModuleInit {
   private async iniciarBot() {
     const allowOwnMessages =
       (process.env.WHATSAPP_ALLOW_OWN_MESSAGES || '').toLowerCase() === 'true';
+
     const prisma = this.prisma as unknown as PrismaAccess;
 
     // 1. Manejo de Sesión (guarda tu login para no escanear el QR cada vez)
@@ -58,8 +64,8 @@ export class WhatsappService implements OnModuleInit {
     const sock = makeWASocket({
       auth: state,
       emitOwnEvents: true,
-      printQRInTerminal: false, // Lo apagamos porque usaremos qrcode-terminal que se ve mejor
-      logger: pino({ level: 'silent' }), // Apaga los logs internos para no ensuciar tu consola
+      printQRInTerminal: false,
+      logger: pino({ level: 'silent' }),
     });
 
     // 3. Evento: Escuchar actualizaciones de conexión (Aquí mostramos el QR)
@@ -67,8 +73,16 @@ export class WhatsappService implements OnModuleInit {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        console.log('Scan el siguiente QR con tu WhatsApp:');
+        console.log('Escanea el siguiente QR con tu WhatsApp:');
+        this.estadoConexion = 'ESPERANDO_QR';
+        this.qrActual = qr;
         qrTerminal.generate(qr, { small: true });
+      }
+
+      if (connection == 'open') {
+        this.estadoConexion = 'CONECTADO';
+        this.qrActual = null;
+        console.log('Bot de whatsapp conectado');
       }
 
       if (connection === 'close') {
@@ -78,15 +92,14 @@ export class WhatsappService implements OnModuleInit {
             ? (lastError as { output?: { statusCode?: number } }).output
                 ?.statusCode
             : undefined;
+
+        this.estadoConexion = 'DESCONECTADO';
+        this.qrActual = null;
         const reset = statusCode !== DisconnectReason.loggedOut;
         console.log('Conexión cerrada. ¿Reconectar?', reset);
         if (reset) {
           void this.iniciarBot(); // Intenta reconectar si no cerraste sesión manualmente
         }
-      } else if (connection === 'open') {
-        console.log(
-          '✅ Bot de WhatsApp (Baileys) iniciado y conectado correctamente',
-        );
       }
     });
 

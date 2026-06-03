@@ -1,3 +1,8 @@
+# Backend - Supervisor de Rutas
+
+> [!IMPORTANT]
+> Para la guía de despliegue completa en producción (incluyendo la base de datos de PostgreSQL en Docker, configuración de variables de entorno y Nginx), por favor consulta el [README.md principal de la raíz](file:///Users/hector/Desktop/supervisor-rutas/README.md).
+
 <p align="center">
   <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
 </p>
